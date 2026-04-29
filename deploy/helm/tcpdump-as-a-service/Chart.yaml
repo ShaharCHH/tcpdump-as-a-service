@@ -1,0 +1,6 @@
+apiVersion: v2
+name: tcpdump-as-a-service
+description: Run tcpdump on Kubernetes/OpenShift pods through a privileged DaemonSet agent
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

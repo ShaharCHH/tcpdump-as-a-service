@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# Hub service account — needs cluster-level read access to pods/namespaces
+# and the ability to create TokenReviews / SubjectAccessReviews.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-hub
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-hub
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+rules:
+  # List all namespaces (to find ones the user has access to)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  # Get pod details (nodeName, containerStatuses) to route captures
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Validate user tokens (AUTH_MODE=kubernetes)
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  # Check user RBAC (to filter namespaces by admin access)
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews", "subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-hub
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-hub
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-hub
+    namespace: {{ .Release.Namespace }}
+---
+# ---------------------------------------------------------------------------
+# Agent service account — the agent only needs to call home to the hub.
+# No k8s API access required.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}

@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-hub
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub
+spec:
+  replicas: {{ .Values.hub.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-hub
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-hub
+        {{- include "tcpdump.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-hub
+      containers:
+        - name: hub
+          image: {{ .Values.image.hub }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          # Load non-secret config from the ConfigMap
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-hub-config
+          # Load secrets individually so they don't appear in env dumps
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-hub-secret
+                  key: SECRET_KEY
+            {{- if eq .Values.auth.mode "openshift" }}
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-hub-secret
+                  key: OAUTH_CLIENT_SECRET
+            {{- end }}
+          volumeMounts:
+            - name: pcap-storage
+              mountPath: /pcaps
+          readinessProbe:
+            httpGet:
+              path: /docs
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /docs
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: pcap-storage
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-pcap-storage

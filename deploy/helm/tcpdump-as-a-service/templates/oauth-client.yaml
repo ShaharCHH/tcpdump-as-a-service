@@ -1,0 +1,15 @@
+{{- if and .Values.openshift.enabled (eq .Values.auth.mode "openshift") }}
+# OAuthClient — OpenShift only.
+# Registers the hub as an OAuth client so users can log in with their
+# OpenShift credentials via the browser redirect flow.
+apiVersion: oauth.openshift.io/v1
+kind: OAuthClient
+metadata:
+  name: {{ .Values.auth.openshift.clientId }}
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+secret: {{ .Values.auth.openshift.clientSecret | quote }}
+redirectURIs:
+  - {{ .Values.auth.openshift.callbackUrl | quote }}
+grantMethod: auto
+{{- end }}

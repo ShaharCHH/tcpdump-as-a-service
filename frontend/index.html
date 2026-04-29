@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>tcpdump as a service</title>
+    <style>
+      /* -----------------------------------------------------------------------
+         Global base styles — kept minimal so individual components own their look.
+         We use CSS custom properties for colours so the theme is easy to change.
+      ----------------------------------------------------------------------- */
+      :root {
+        --color-bg: #0f1117;
+        --color-surface: #1a1d2e;
+        --color-border: #2a2d3e;
+        --color-primary: #4f8ef7;
+        --color-primary-dark: #3a72d8;
+        --color-danger: #e05c5c;
+        --color-success: #4caf8e;
+        --color-text: #e2e4f0;
+        --color-text-muted: #8a8da8;
+        --color-terminal-bg: #0a0c14;
+        --color-terminal-text: #a0f0a0;
+        --font-mono: "Fira Mono", "Cascadia Code", "Consolas", monospace;
+        --font-sans: system-ui, -apple-system, sans-serif;
+        --radius: 8px;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        background: var(--color-bg);
+        color: var(--color-text);
+        font-family: var(--font-sans);
+        font-size: 14px;
+        line-height: 1.6;
+        min-height: 100vh;
+      }
+
+      a { color: var(--color-primary); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      button {
+        cursor: pointer;
+        font-family: inherit;
+        font-size: inherit;
+      }
+
+      input, select {
+        font-family: inherit;
+        font-size: inherit;
+        background: var(--color-surface);
+        color: var(--color-text);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius);
+        padding: 6px 10px;
+      }
+
+      input:focus, select:focus {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

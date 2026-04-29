@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace }}
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+    # This label prevents regular users from scheduling pods here via PodSecurity admission.
+    pod-security.kubernetes.io/enforce: privileged

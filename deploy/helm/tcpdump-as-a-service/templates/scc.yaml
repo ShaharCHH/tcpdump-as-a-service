@@ -1,0 +1,27 @@
+{{- if .Values.openshift.enabled }}
+# SecurityContextConstraints — OpenShift only.
+# Grants the agent ServiceAccount permission to run privileged pods with hostPID.
+# This resource type exists only on OpenShift; it is skipped on vanilla k8s.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: {{ .Release.Name }}-agent
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+allowPrivilegedContainer: true
+allowHostPID: true
+allowHostNetwork: false
+allowHostIPC: false
+allowHostPorts: false
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: RunAsAny
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+users:
+  - system:serviceaccount:{{ .Release.Namespace }}:{{ .Release.Name }}-agent
+groups: []
+{{- end }}

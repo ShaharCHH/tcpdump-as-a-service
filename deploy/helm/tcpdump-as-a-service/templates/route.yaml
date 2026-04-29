@@ -1,0 +1,20 @@
+{{- if .Values.openshift.enabled }}
+# OpenShift Route — exposes the hub externally through the cluster's router.
+# Equivalent to an Ingress on vanilla k8s.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ .Release.Name }}-hub
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+spec:
+  to:
+    kind: Service
+    name: {{ .Release.Name }}-hub
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}

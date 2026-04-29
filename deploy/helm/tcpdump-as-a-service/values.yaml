@@ -1,0 +1,113 @@
+# =============================================================================
+# tcpdump-as-a-service — Helm values
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Authentication
+# -----------------------------------------------------------------------------
+auth:
+  # "kubernetes" — user pastes a bearer token (works on any k8s cluster incl. k3d)
+  # "openshift"  — seamless OAuth2 redirect via OpenShift's built-in OAuth server
+  mode: kubernetes
+
+  openshift:
+    # Base URL of the OpenShift API server (required when mode=openshift)
+    apiUrl: ""
+    # OAuth client ID — must match the OAuthClient resource name on the cluster
+    clientId: "tcpdump-hub"
+    # OAuth client secret — set via --set auth.openshift.clientSecret=... or a Secret
+    clientSecret: ""
+    # Full external URL the browser is redirected back to after login
+    # e.g. https://tcpdump.apps.mycluster.example.com/auth/callback
+    callbackUrl: ""
+
+# -----------------------------------------------------------------------------
+# OpenShift-specific resources
+# -----------------------------------------------------------------------------
+openshift:
+  # Set true when deploying on OpenShift.
+  # Enables: SecurityContextConstraints, Route, OAuthClient template.
+  # When false: plain Ingress is created instead of a Route.
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Container images
+# -----------------------------------------------------------------------------
+image:
+  hub: "tcpdump-hub:latest"
+  agent: "tcpdump-agent:latest"
+  # IfNotPresent is correct for k3d (images imported locally).
+  # Change to Always for a registry-based CI/CD pipeline.
+  pullPolicy: IfNotPresent
+
+# -----------------------------------------------------------------------------
+# Capture limits (enforced by the hub)
+# -----------------------------------------------------------------------------
+limits:
+  # Maximum capture duration a user can request (minutes)
+  maxDurationMinutes: 30
+  # Maximum simultaneous captures across all users
+  maxConcurrentCaptures: 10
+  # Maximum simultaneous captures per individual user
+  maxConcurrentPerUser: 3
+
+# -----------------------------------------------------------------------------
+# pcap file storage
+# -----------------------------------------------------------------------------
+pcap:
+  # How long completed capture files are kept before auto-deletion (hours)
+  ttlHours: 24
+  # tcpdump -W: ring buffer size (number of rotation files kept per pod capture)
+  maxFiles: 10
+  # tcpdump -C: rotate when a file reaches this size (megabytes)
+  maxFileMB: 50
+  # tcpdump -G: also rotate every N seconds
+  rotationSeconds: 60
+
+storage:
+  # Size of the PersistentVolumeClaim used to store pcap files
+  size: 20Gi
+  # Storage class to use.
+  # "local-path" is the default for k3d (k3s built-in provisioner).
+  # Leave empty ("") to use the cluster's default storage class.
+  storageClass: "local-path"
+
+# -----------------------------------------------------------------------------
+# Hub deployment
+# -----------------------------------------------------------------------------
+hub:
+  replicas: 1
+  # In-cluster WebSocket URL agents use to reach the hub Service.
+  # Default uses the Kubernetes service DNS name in the release namespace.
+  # Override if you deploy into a custom namespace.
+  wsUrl: ""  # auto-computed from release namespace if empty
+
+  # Session cookie security — CHANGE THIS in production!
+  secretKey: "changeme-in-production"
+
+  # Comma-separated list of k8s usernames that may view the audit log.
+  adminUsers: ""
+
+  service:
+    port: 8080
+
+# -----------------------------------------------------------------------------
+# Agent DaemonSet
+# -----------------------------------------------------------------------------
+agent:
+  # Port the agent's local HTTP server listens on (for pcap download by hub)
+  httpPort: 8081
+
+# -----------------------------------------------------------------------------
+# Ingress (used when openshift.enabled=false)
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  # "traefik" is the default for k3d/k3s. Use "nginx" for nginx-ingress.
+  className: "traefik"
+  host: "tcpdump.local"
+  tls: []
+  # tls:
+  #   - secretName: tcpdump-tls
+  #     hosts:
+  #       - tcpdump.local

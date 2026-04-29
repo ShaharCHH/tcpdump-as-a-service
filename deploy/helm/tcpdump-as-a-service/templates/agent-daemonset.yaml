@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Release.Name }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-agent
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-agent
+        {{- include "tcpdump.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-agent
+      # hostPID=true is required: makes all host process PIDs visible inside the
+      # agent pod so we can search /proc/*/cgroup for the target container's PID
+      # and then nsenter into its network namespace.
+      hostPID: true
+      containers:
+        - name: agent
+          image: {{ .Values.image.agent }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.agent.httpPort }}
+              name: http
+          env:
+            - name: HUB_WS_URL
+              value: {{ include "tcpdump.hubWsUrl" . | quote }}
+            - name: AGENT_HTTP_PORT
+              value: {{ .Values.agent.httpPort | quote }}
+            - name: CAPTURE_BASE_DIR
+              value: "/captures"
+            # Kubernetes downward API: injects the node name this pod runs on.
+            # The agent sends this to the hub during registration so the hub knows
+            # which node the agent covers.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            # privileged=true is required for nsenter to enter other namespaces.
+            # On OpenShift this is allowed by the SCC created in scc.yaml.
+            privileged: true
+          volumeMounts:
+            # Mount the host /proc read-only so we can search for container PIDs.
+            - name: host-proc
+              mountPath: /proc
+              readOnly: true
+            # Writable directory on the node for pcap files.
+            - name: captures
+              mountPath: /captures
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.agent.httpPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: host-proc
+          hostPath:
+            path: /proc
+        # emptyDir provides a per-node temporary directory for pcap files.
+        # Files here are cleaned up when the agent pod is deleted.
+        - name: captures
+          emptyDir: {}
+      tolerations:
+        # Run on all nodes including control-plane/master nodes
+        - operator: Exists
