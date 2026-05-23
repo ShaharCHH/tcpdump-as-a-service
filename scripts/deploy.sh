@@ -85,7 +85,7 @@ build_frontend() {
   echo ""
   echo ">>> Building React frontend..."
   cd "${FRONTEND_DIR}"
-  npm ci --silent
+  npm ci
   npm run build
   # Copy the Vite output into hub/static so it gets bundled into the hub image
   rm -rf "${HUB_STATIC_DIR}"

@@ -35,7 +35,7 @@ import os
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import audit
@@ -343,4 +343,13 @@ async def ws_capture_stream(websocket: WebSocket, capture_id: str, pod_key: str)
 
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
+    _index_html = os.path.join(_static_dir, "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        candidate = os.path.join(_static_dir, full_path)
+        if os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(_index_html)
+
     app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")

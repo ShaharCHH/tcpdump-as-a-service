@@ -1,0 +1,25 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Build artifacts bundled into Docker image
+hub/static/
+
+# pcap data (local dev storage)
+pcap_data/
+
+# OS / editor
+.DS_Store
+*.swp
