@@ -88,6 +88,10 @@ hub:
   # Comma-separated list of k8s usernames that may view the audit log.
   adminUsers: ""
 
+  # Logging verbosity: "INFO" (default) or "DEBUG" (logs all k8s API calls,
+  # auth decisions, namespace checks, and capture events).
+  logLevel: "INFO"
+
   service:
     port: 8080
 

@@ -54,7 +54,10 @@ from config import settings
 from k8s import list_pods, list_user_namespaces
 from models import CaptureRequest
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="tcpdump-as-a-service", version="0.1.0")
@@ -66,6 +69,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log every inbound request and its response status at DEBUG level."""
+    logger.debug("→ %s %s", request.method, request.url.path)
+    response = await call_next(request)
+    logger.debug("← %s %s %s", request.method, request.url.path, response.status_code)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -158,14 +170,20 @@ async def auth_me(user=Depends(get_current_user)):
 @app.get("/api/namespaces")
 async def api_namespaces(user=Depends(get_current_user)):
     username, token = user
+    logger.debug("api_namespaces: listing namespaces for user=%s", username)
     ns_list = await list_user_namespaces(token)
+    logger.debug("api_namespaces: user=%s got %d namespace(s): %s",
+                 username, len(ns_list), [n["name"] for n in ns_list])
     return {"namespaces": ns_list}
 
 
 @app.get("/api/namespaces/{namespace}/pods")
 async def api_pods(namespace: str, user=Depends(get_current_user)):
-    _, token = user
+    username, token = user
+    logger.debug("api_pods: listing pods in namespace=%s for user=%s", namespace, username)
     pods = await list_pods(token, namespace)
+    logger.debug("api_pods: namespace=%s user=%s got %d pod(s): %s",
+                 namespace, username, len(pods), [p["name"] for p in pods])
     return {"pods": pods}
 
 

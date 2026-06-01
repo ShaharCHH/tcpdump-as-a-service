@@ -20,6 +20,7 @@ data:
   PCAP_ROTATION_SECONDS: {{ .Values.pcap.rotationSeconds | quote }}
   AGENT_HTTP_PORT: {{ .Values.agent.httpPort | quote }}
   ADMIN_USERS: {{ .Values.hub.adminUsers | quote }}
+  LOG_LEVEL: {{ .Values.hub.logLevel | quote }}
   {{- if eq .Values.auth.mode "openshift" }}
   OPENSHIFT_API_URL: {{ .Values.auth.openshift.apiUrl | quote }}
   OAUTH_CLIENT_ID: {{ .Values.auth.openshift.clientId | quote }}
