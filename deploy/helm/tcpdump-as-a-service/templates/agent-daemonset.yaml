@@ -21,6 +21,16 @@ spec:
       # agent pod so we can search /proc/*/cgroup for the target container's PID
       # and then nsenter into its network namespace.
       hostPID: true
+      {{- if .Values.openshift.enabled }}
+      # spc_t (Super Privileged Container) SELinux type tells CRI-O to skip
+      # SELinux process labeling for this pod. Without this, runc fails with
+      # "can't set process label: open /proc/thread-self/attr/exec: read-only
+      # file system" on SELinux-enforcing OpenShift nodes.
+      # The custom SCC (seLinuxContext: RunAsAny) permits this type.
+      securityContext:
+        seLinuxOptions:
+          type: spc_t
+      {{- end }}
       containers:
         - name: agent
           image: {{ .Values.image.agent }}
@@ -47,9 +57,14 @@ spec:
             # On OpenShift this is allowed by the SCC created in scc.yaml.
             privileged: true
           volumeMounts:
-            # Mount the host /proc read-only so we can search for container PIDs.
+            # Mount the host /proc at /host/proc (NOT at /proc) so the container's
+            # own /proc remains intact. Overwriting /proc with a read-only hostPath
+            # causes CRI-O to fail with "can't set process label: read-only file
+            # system" because it can't write /proc/thread-self/attr/exec at startup.
+            # With hostPID: true the container already sees all host PIDs in its own
+            # /proc; we only need this mount for the cgroup-file scan in capture.py.
             - name: host-proc
-              mountPath: /proc
+              mountPath: /host/proc
               readOnly: true
             # Writable directory on the node for pcap files.
             - name: captures

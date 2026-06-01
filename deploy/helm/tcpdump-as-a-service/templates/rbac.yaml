@@ -60,3 +60,36 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "tcpdump.labels" . | nindent 4 }}
+{{- if .Values.openshift.enabled }}
+---
+# Bind the agent ServiceAccount to the custom SCC via RBAC.
+# This is the recommended approach for OCP 4.11+ (the legacy "users:" field
+# in the SCC spec is deprecated and unreliable in newer OpenShift versions).
+# "oc adm policy add-scc-to-user" does exactly this under the hood.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-agent-scc
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["{{ .Release.Name }}-agent"]
+    verbs: ["use"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-agent-scc
+  labels:
+    {{- include "tcpdump.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-agent-scc
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-agent
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -21,7 +21,6 @@ fsGroup:
   type: RunAsAny
 supplementalGroups:
   type: RunAsAny
-users:
-  - system:serviceaccount:{{ .Release.Namespace }}:{{ .Release.Name }}-agent
+users: []
 groups: []
 {{- end }}

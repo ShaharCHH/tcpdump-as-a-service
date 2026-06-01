@@ -4,9 +4,10 @@ tcpdump capture execution on the agent node.
 How it works
 ------------
 1. find_container_pid: Given a container ID (e.g. "containerd://abc123..."), search
-   /proc/*/cgroup for the short container ID to find the PID of a process in that
-   container. This requires the agent pod to run with hostPID: true so that all host
-   PIDs are visible inside the agent's /proc.
+   /host/proc/*/cgroup for the short container ID to find the PID of a process in
+   that container. The host /proc is mounted at /host/proc (not /proc) so that the
+   container's own /proc stays intact — overwriting it read-only breaks CRI-O's
+   SELinux labeling at startup. hostPID: true makes all host PIDs visible.
 
 2. run_capture: Uses `nsenter -t <pid> -n` to enter the target container's network
    namespace, then runs tcpdump there. This captures only that container's traffic
@@ -48,12 +49,14 @@ def find_container_pid(container_id: str) -> int | None:
     # Strip "containerd://", "docker://", "cri-o://", etc.
     short_id = re.sub(r"^[a-z\-]+://", "", container_id)[:12]
 
-    for cgroup_path in glob.glob("/proc/*/cgroup"):
+    # /host/proc is the host's /proc mounted read-only at a safe path.
+    # Path structure: /host/proc/<pid>/cgroup → split index 3 is the PID.
+    for cgroup_path in glob.glob("/host/proc/*/cgroup"):
         try:
             with open(cgroup_path) as f:
                 content = f.read()
             if short_id in content:
-                pid_str = cgroup_path.split("/")[2]
+                pid_str = cgroup_path.split("/")[3]
                 if pid_str.isdigit():
                     return int(pid_str)
         except (PermissionError, FileNotFoundError, ProcessLookupError):
@@ -100,7 +103,7 @@ async def run_capture(
     """
     pid = find_container_pid(container_id)
     if pid is None:
-        yield {"type": "ERROR", "message": f"Container {container_id[:20]} not found in /proc"}
+        yield {"type": "ERROR", "message": f"Container {container_id[:20]} not found in /host/proc"}
         return
 
     bpf = build_bpf_filter(filters)
