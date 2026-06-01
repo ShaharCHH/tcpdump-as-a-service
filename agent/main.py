@@ -26,7 +26,11 @@ import websockets
 import capture as cap
 from server import start_server
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger("agent")
 
 HUB_WS_URL = os.environ["HUB_WS_URL"]
@@ -60,6 +64,17 @@ async def handle_job(ws, job: dict) -> None:
             ):
                 # Attach routing info so the hub knows where to forward the event
                 payload = {"capture_id": capture_id, "pod_key": pod_key, **event}
+                event_type = event.get("type")
+                if event_type == "PACKET_LINE":
+                    logger.debug("PACKET_LINE capture=%s pod=%s: %s",
+                                 capture_id, pod_key, event.get("line", ""))
+                elif event_type == "PCAP_CHUNK":
+                    logger.debug("PCAP_CHUNK capture=%s pod=%s file=%s size=%d bytes",
+                                 capture_id, pod_key, event.get("filename"),
+                                 len(event.get("data", "")))
+                else:
+                    logger.debug("EVENT capture=%s pod=%s type=%s",
+                                 capture_id, pod_key, event_type)
                 await ws.send(json.dumps(payload))
         except Exception as e:
             logger.error("Capture error for %s/%s: %s", capture_id, pod_key, e)
@@ -114,9 +129,11 @@ async def run_agent() -> None:
 
                     if msg_type == "START_CAPTURE":
                         logger.info(
-                            "START_CAPTURE: capture=%s pod=%s",
+                            "START_CAPTURE: capture=%s pod=%s container=%s duration=%ss",
                             msg.get("capture_id"), msg.get("pod_key"),
+                            msg.get("container_id", "")[:20], msg.get("duration_seconds"),
                         )
+                        logger.debug("START_CAPTURE full payload: %s", msg)
                         asyncio.create_task(handle_job(ws, msg))
 
                     elif msg_type == "CANCEL_CAPTURE":
@@ -127,7 +144,7 @@ async def run_agent() -> None:
                         await handle_cancel(msg)
 
                     else:
-                        logger.warning("Unknown message type: %s", msg_type)
+                        logger.warning("Unknown message type: %s | full msg: %s", msg_type, msg)
 
         except (websockets.ConnectionClosed, OSError) as e:
             logger.warning("Hub connection lost (%s), reconnecting in %ds...", e, RECONNECT_DELAY)

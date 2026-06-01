@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # Comma-separated k8s usernames that may view the audit log in the UI.
     admin_users: str = ""
 
+    # --- Logging ---
+    # Set to "DEBUG" to enable verbose logging of all k8s API calls, auth
+    # decisions, and capture events. Defaults to "INFO" in production.
+    log_level: str = "INFO"
+
     @property
     def admin_user_list(self) -> list[str]:
         return [u.strip() for u in self.admin_users.split(",") if u.strip()]

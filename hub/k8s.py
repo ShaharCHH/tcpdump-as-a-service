@@ -14,12 +14,15 @@ The hub service account needs a ClusterRole with:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from kubernetes import client as k8s_client
 from kubernetes import config as k8s_config
 
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Client factories
@@ -31,6 +34,8 @@ def get_hub_client() -> dict[str, Any]:
     Loads in-cluster config when k8s_in_cluster=True, otherwise falls back to
     the local kubeconfig (useful for local development).
     """
+    logger.debug("get_hub_client: loading %s config",
+                 "in-cluster" if settings.k8s_in_cluster else "kubeconfig")
     if settings.k8s_in_cluster:
         k8s_config.load_incluster_config()
     else:
@@ -40,6 +45,7 @@ def get_hub_client() -> dict[str, Any]:
         "core_v1": k8s_client.CoreV1Api(),
         "auth_v1": k8s_client.AuthenticationV1Api(),
         "authz_v1": k8s_client.AuthorizationV1Api(),
+        "custom": k8s_client.CustomObjectsApi(),
     }
 
 
@@ -48,6 +54,7 @@ def get_user_client(user_token: str) -> dict[str, Any]:
     Return Kubernetes API clients configured with the user's bearer token.
     All calls through this client are subject to the user's RBAC permissions.
     """
+    logger.debug("get_user_client: building user-impersonated client")
     configuration = k8s_client.Configuration()
 
     if settings.k8s_in_cluster:
@@ -61,6 +68,7 @@ def get_user_client(user_token: str) -> dict[str, Any]:
     api_client = k8s_client.ApiClient(configuration=configuration)
     return {
         "core_v1": k8s_client.CoreV1Api(api_client=api_client),
+        "custom": k8s_client.CustomObjectsApi(api_client=api_client),
     }
 
 
@@ -70,31 +78,82 @@ def get_user_client(user_token: str) -> dict[str, Any]:
 
 async def list_user_namespaces(user_token: str) -> list[dict]:
     """
-    Return namespaces where the user has the 'admin' role (i.e. can create/delete
-    most resources). We list all namespaces visible to the user and then issue a
-    SelfSubjectAccessReview for each to check for the 'admin' verb on pods.
+    Return namespaces where the user can create pods (proxy for admin access).
+
+    Strategy:
+      1. Try listing all namespaces via the standard k8s API (works on vanilla k8s
+         and for cluster-admin users on OpenShift).
+      2. If that returns 403 (typical for non-cluster-admin users on OpenShift),
+         fall back to the OpenShift Projects API which returns only the projects
+         the user has access to — no cluster-wide list permission needed.
+      3. For each namespace/project found, verify create-pods permission via
+         SelfSubjectAccessReview using the user's own token.
 
     Returns a list of dicts: [{"name": "...", "status": "Active"}, ...]
     """
-    clients = get_user_client(user_token)
-    core = clients["core_v1"]
+    user_clients = get_user_client(user_token)
+    core = user_clients["core_v1"]
 
+    # --- Step 1: try standard k8s namespace list ---
+    raw_namespaces: list[dict] = []   # [{"name": ..., "status": ...}]
     try:
+        logger.debug("list_user_namespaces: calling list_namespace() with user token")
         ns_list = core.list_namespace()
+        raw_namespaces = [
+            {"name": ns.metadata.name, "status": ns.status.phase}
+            for ns in ns_list.items
+        ]
+        logger.debug("list_user_namespaces: list_namespace() returned %d entries: %s",
+                     len(raw_namespaces), [n["name"] for n in raw_namespaces])
+
     except k8s_client.exceptions.ApiException as e:
         if e.status == 403:
-            # User can only see namespaces they have access to on some clusters.
-            # Try listing with a different scope.
-            return []
-        raise
+            # --- Step 2: OpenShift Projects API fallback ---
+            # On OpenShift, regular users (even namespace admins) cannot list ALL
+            # namespaces cluster-wide. The Projects API returns only the projects
+            # the authenticated user can see, filtered by their RBAC automatically.
+            logger.debug(
+                "list_user_namespaces: list_namespace() returned 403 — "
+                "falling back to OpenShift projects.project.openshift.io API"
+            )
+            try:
+                custom = user_clients["custom"]
+                projects = custom.list_cluster_custom_object(
+                    group="project.openshift.io",
+                    version="v1",
+                    plural="projects",
+                )
+                raw_namespaces = [
+                    {
+                        "name": p["metadata"]["name"],
+                        "status": p.get("status", {}).get("phase", "Active"),
+                    }
+                    for p in projects.get("items", [])
+                ]
+                logger.debug(
+                    "list_user_namespaces: OpenShift projects API returned %d project(s): %s",
+                    len(raw_namespaces), [n["name"] for n in raw_namespaces]
+                )
+            except k8s_client.exceptions.ApiException as oe:
+                # Not OpenShift, or no projects at all — return empty
+                logger.warning(
+                    "list_user_namespaces: OpenShift projects API also failed "
+                    "(status=%s). User may have no accessible namespaces. body=%s",
+                    oe.status, oe.body,
+                )
+                return []
+        else:
+            logger.error("list_user_namespaces: list_namespace() failed with status=%s body=%s",
+                         e.status, e.body)
+            raise
 
-    hub_clients = get_hub_client()
-    authz = hub_clients["authz_v1"]
-
+    # --- Step 3: filter by create-pods permission ---
+    # Build a single user-impersonated AuthorizationV1Api for all reviews.
+    user_authz = k8s_client.AuthorizationV1Api(api_client=core.api_client)
     accessible = []
-    for ns in ns_list.items:
-        name = ns.metadata.name
-        # Check if the user can create pods in this namespace (proxy for admin access)
+
+    for ns in raw_namespaces:
+        name = ns["name"]
         review = k8s_client.V1SelfSubjectAccessReview(
             spec=k8s_client.V1SelfSubjectAccessReviewSpec(
                 resource_attributes=k8s_client.V1ResourceAttributes(
@@ -104,22 +163,24 @@ async def list_user_namespaces(user_token: str) -> list[dict]:
                 )
             )
         )
-        # We impersonate the user by passing their token via the Impersonate header
-        # using the hub's client — this is the standard k8s impersonation pattern.
         try:
-            # Use the user's own client for the access review
-            user_authz = k8s_client.AuthorizationV1Api(
-                api_client=get_user_client(user_token)["core_v1"].api_client
-            )
             result = user_authz.create_self_subject_access_review(review)
-            if result.status.allowed:
-                accessible.append({
-                    "name": name,
-                    "status": ns.status.phase,
-                })
-        except Exception:
+            allowed = result.status.allowed
+            logger.debug(
+                "list_user_namespaces: create-pods check namespace=%s allowed=%s",
+                name, allowed,
+            )
+            if allowed:
+                accessible.append(ns)
+        except Exception as ex:
+            logger.warning(
+                "list_user_namespaces: access review failed for namespace=%s: %s",
+                name, ex,
+            )
             continue
 
+    logger.debug("list_user_namespaces: final accessible namespaces: %s",
+                 [n["name"] for n in accessible])
     return accessible
 
 
@@ -134,10 +195,17 @@ async def list_pods(user_token: str, namespace: str) -> list[dict]:
 
     Returns a list of dicts with pod name, status, and container names.
     """
+    logger.debug("list_pods: namespace=%s", namespace)
     clients = get_user_client(user_token)
     core = clients["core_v1"]
 
-    pod_list = core.list_namespaced_pod(namespace=namespace)
+    try:
+        pod_list = core.list_namespaced_pod(namespace=namespace)
+    except k8s_client.exceptions.ApiException as e:
+        logger.error("list_pods: namespace=%s failed status=%s body=%s",
+                     namespace, e.status, e.body)
+        raise
+
     result = []
     for pod in pod_list.items:
         containers = [c.name for c in (pod.spec.containers or [])]
@@ -148,6 +216,11 @@ async def list_pods(user_token: str, namespace: str) -> list[dict]:
             "containers": containers,
             "node_name": pod.spec.node_name,
         })
+        logger.debug("list_pods: pod=%s status=%s node=%s containers=%s",
+                     pod.metadata.name, pod.status.phase,
+                     pod.spec.node_name, containers)
+
+    logger.debug("list_pods: namespace=%s returned %d pod(s)", namespace, len(result))
     return result
 
 
@@ -155,7 +228,7 @@ async def list_pods(user_token: str, namespace: str) -> list[dict]:
 # Pod detail lookup (hub service-account)
 # ---------------------------------------------------------------------------
 
-async def get_pod_capture_info(pod_name: str, namespace: str) -> dict:
+async def get_pod_capture_info(pod_name: str, namespace: str) -> dict:  # noqa: D401
     """
     Return the information needed to start a capture on a pod:
       - node_name: which cluster node the pod runs on (used to route to the right agent)
@@ -164,6 +237,7 @@ async def get_pod_capture_info(pod_name: str, namespace: str) -> dict:
 
     This call uses the hub's own service account, not the user's token.
     """
+    logger.debug("get_pod_capture_info: pod=%s/%s", namespace, pod_name)
     hub = get_hub_client()
     core = hub["core_v1"]
 
@@ -178,6 +252,8 @@ async def get_pod_capture_info(pod_name: str, namespace: str) -> dict:
     container_id = cs.container_id  # e.g. "containerd://abc123..."
     container_name = cs.name
 
+    logger.debug("get_pod_capture_info: pod=%s/%s node=%s container=%s id=%s",
+                 namespace, pod_name, node_name, container_name, container_id)
     return {
         "node_name": node_name,
         "container_id": container_id,
