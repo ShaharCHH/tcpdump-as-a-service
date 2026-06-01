@@ -1,0 +1,12 @@
+# Always checkout shell scripts with LF line endings regardless of OS.
+# This prevents Windows from converting them to CRLF, which breaks bash/sh.
+*.sh        text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.toml      text eol=lf
+*.env*      text eol=lf
+Dockerfile* text eol=lf
