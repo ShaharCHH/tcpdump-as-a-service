@@ -147,3 +147,9 @@ target pod's network namespace
 - **pcap files live on the agent node temporarily** (emptyDir volume), then stream to the hub's PVC. If the agent pod is deleted before streaming completes, those files are lost.
 - **`AUTH_MODE` cannot be changed at runtime** — it is baked into the ConfigMap and requires a hub restart.
 - The hub's `static/` directory (React build output) is populated by `scripts/deploy.sh` before the Docker image is built. Running `uvicorn` without it serves API-only (fine for local dev with `npm run dev`).
+
+---
+
+## Line endings
+
+Line endings are normalized to **LF** via `.gitattributes`. This project is often edited from Windows/WSL — if `git status` shows many modified files with a perfectly balanced insertions/deletions count, it is CRLF→LF churn, not real changes. Confirm with `git diff --ignore-all-space` (empty output = pure line-ending churn) before committing.
