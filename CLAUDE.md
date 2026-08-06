@@ -103,7 +103,7 @@ target pod's network namespace
 
 | File | Responsibility |
 |---|---|
-| `capture.py` | `find_container_pid` (scans `/proc/*/cgroup`), BPF filter builder, dual tcpdump processes, base64 chunk streaming |
+| `capture.py` | `find_container_pid` (host `crictl`, falling back to a `/host/proc/*/cgroup` scan), BPF filter builder, dual tcpdump processes, base64 chunk streaming |
 | `main.py` | WebSocket client with auto-reconnect; dispatches `START_CAPTURE` to `capture.py` as asyncio tasks |
 | `server.py` | aiohttp HTTP server on port 8081 for direct pcap file download by the hub |
 
@@ -113,7 +113,7 @@ target pod's network namespace
 1. Browser → `POST /api/captures` → `captures.start_capture()`
 2. For each pod: hub SA calls `k8s.get_pod_capture_info()` to get `node_name` + `container_id`
 3. Hub looks up the agent for that node in `agents.registry`, sends `START_CAPTURE` over WebSocket
-4. Agent calls `capture.find_container_pid()` → `nsenter ... tcpdump`, streams `PACKET_LINE` events back
+4. Agent calls `capture.find_container_pid()` (async) → `nsenter ... tcpdump`, streams `PACKET_LINE` events back
 5. Hub forwards `PACKET_LINE` to all client WebSockets subscribed to `/ws/capture/{id}/{pod_key}`
 
 **pcap file delivery:**
@@ -130,7 +130,15 @@ target pod's network namespace
 
 ### Finding a container's PID (privileged, agent-side)
 
-`capture.find_container_pid()` scans `/proc/*/cgroup` for the short container ID (first 12 chars of the container runtime ID from the k8s API, e.g. `containerd://abc123...`). Requires `hostPID: true` in the DaemonSet so all host PIDs are visible. Then `nsenter -t <pid> -n` enters that container's network namespace without modifying the target pod.
+`capture.find_container_pid()` takes the container runtime ID from the k8s API (e.g. `containerd://abc123...`) and resolves a PID inside that container. Two strategies, in order:
+
+1. **Ask the runtime (primary).** `nsenter -t 1 -m -- crictl inspect -o json <id>`, reading `.info.pid`. Entering PID 1's mount namespace gives us the host filesystem, so this uses the *node's* `crictl` and its `/etc/crictl.yaml` — already configured for whichever runtime the node runs, so the hub never needs to know the CRI socket path. This is the programmatic equivalent of the manual `oc debug node/<n>` → `chroot /host` → `crictl inspect` procedure.
+
+2. **Scan `/host/proc/*/cgroup` (fallback).** Matches the first 12 chars of the container ID. Kept for nodes without a `crictl` on `PATH` — notably k3s/k3d, which ships it as `k3s crictl`.
+
+The scan cannot work on cgroup v2 nodes that place each pod in a private cgroup namespace (the default under CRI-O on recent OpenShift): the kernel renders `/proc/<pid>/cgroup` relative to the *reading* process's cgroup namespace root, so the container ID is absent from the file contents entirely. No pod-spec field opts out of this — hence crictl is primary.
+
+Both paths need `privileged: true` and `hostPID: true` on the DaemonSet. Once a PID is found, `nsenter -t <pid> -n` enters that container's network namespace without modifying the target pod.
 
 ### Helm chart conditionals
 
